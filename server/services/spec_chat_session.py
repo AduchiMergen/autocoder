@@ -100,8 +100,10 @@ class SpecChatSession:
                     allowed_tools=[
                         "Read",
                         "Write",
+                        "Edit",
                         "Glob",
                     ],
+                    permission_mode="acceptEdits",  # Auto-approve file writes for spec creation
                     max_turns=100,
                     cwd=str(ROOT_DIR.resolve()),
                 )
@@ -175,6 +177,12 @@ class SpecChatSession:
         Internal method to query Claude and stream responses.
 
         Handles tool calls (Write) and text responses.
+
+        IMPORTANT: Spec creation requires BOTH files to be written:
+        1. app_spec.txt - the main specification
+        2. initializer_prompt.md - tells the agent how many features to create
+
+        We only signal spec_complete when BOTH files are verified on disk.
         """
         if not self.client:
             return
@@ -183,7 +191,21 @@ class SpecChatSession:
         await self.client.query(message)
 
         current_text = ""
-        pending_spec_write = None  # Track if we're waiting for app_spec.txt write result
+
+        # Track pending writes for BOTH required files
+        pending_writes = {
+            "app_spec": None,      # {"tool_id": ..., "path": ...}
+            "initializer": None,   # {"tool_id": ..., "path": ...}
+        }
+
+        # Track which files have been successfully written
+        files_written = {
+            "app_spec": False,
+            "initializer": False,
+        }
+
+        # Store paths for the completion message
+        spec_path = None
 
         # Stream the response using receive_response
         async for msg in self.client.receive_response():
@@ -213,23 +235,25 @@ class SpecChatSession:
                         tool_input = getattr(block, "input", {})
                         tool_id = getattr(block, "id", "")
 
-                        if tool_name == "Write":
-                            # File being written - track for verification
+                        if tool_name in ("Write", "Edit"):
+                            # File being written or edited - track for verification
                             file_path = tool_input.get("file_path", "")
 
-                            # Track if this is the app_spec.txt file
+                            # Track app_spec.txt
                             if "app_spec.txt" in str(file_path):
-                                pending_spec_write = {
+                                pending_writes["app_spec"] = {
                                     "tool_id": tool_id,
                                     "path": file_path
                                 }
-                                logger.info(f"Write tool called for app_spec.txt: {file_path}")
+                                logger.info(f"{tool_name} tool called for app_spec.txt: {file_path}")
 
+                            # Track initializer_prompt.md
                             elif "initializer_prompt.md" in str(file_path):
-                                yield {
-                                    "type": "file_written",
-                                    "path": str(file_path)
+                                pending_writes["initializer"] = {
+                                    "tool_id": tool_id,
+                                    "path": file_path
                                 }
+                                logger.info(f"{tool_name} tool called for initializer_prompt.md: {file_path}")
 
             elif msg_type == "UserMessage" and hasattr(msg, "content"):
                 # Tool results - check for write confirmations and errors
@@ -242,26 +266,57 @@ class SpecChatSession:
                         if is_error:
                             content = getattr(block, "content", "Unknown error")
                             logger.warning(f"Tool error: {content}")
-                            # If the spec write failed, clear the pending write
-                            if pending_spec_write and tool_use_id == pending_spec_write.get("tool_id"):
-                                logger.error(f"app_spec.txt write failed: {content}")
-                                pending_spec_write = None
+                            # Clear any pending writes that failed
+                            for key in pending_writes:
+                                if pending_writes[key] and tool_use_id == pending_writes[key].get("tool_id"):
+                                    logger.error(f"{key} write failed: {content}")
+                                    pending_writes[key] = None
                         else:
-                            # Tool succeeded - check if it was the spec write
-                            if pending_spec_write and tool_use_id == pending_spec_write.get("tool_id"):
-                                spec_path = pending_spec_write["path"]
-                                # Verify the file actually exists
-                                full_path = ROOT_DIR / spec_path
+                            # Tool succeeded - check which file was written
+
+                            # Check app_spec.txt
+                            if pending_writes["app_spec"] and tool_use_id == pending_writes["app_spec"].get("tool_id"):
+                                file_path = pending_writes["app_spec"]["path"]
+                                full_path = ROOT_DIR / file_path
                                 if full_path.exists():
                                     logger.info(f"app_spec.txt verified at: {full_path}")
-                                    self.complete = True
+                                    files_written["app_spec"] = True
+                                    spec_path = file_path
+
+                                    # Notify about file write (but NOT completion yet)
                                     yield {
-                                        "type": "spec_complete",
-                                        "path": str(spec_path)
+                                        "type": "file_written",
+                                        "path": str(file_path)
                                     }
                                 else:
                                     logger.error(f"app_spec.txt not found after write: {full_path}")
-                                pending_spec_write = None
+                                pending_writes["app_spec"] = None
+
+                            # Check initializer_prompt.md
+                            if pending_writes["initializer"] and tool_use_id == pending_writes["initializer"].get("tool_id"):
+                                file_path = pending_writes["initializer"]["path"]
+                                full_path = ROOT_DIR / file_path
+                                if full_path.exists():
+                                    logger.info(f"initializer_prompt.md verified at: {full_path}")
+                                    files_written["initializer"] = True
+
+                                    # Notify about file write
+                                    yield {
+                                        "type": "file_written",
+                                        "path": str(file_path)
+                                    }
+                                else:
+                                    logger.error(f"initializer_prompt.md not found after write: {full_path}")
+                                pending_writes["initializer"] = None
+
+                            # Check if BOTH files are now written - only then signal completion
+                            if files_written["app_spec"] and files_written["initializer"]:
+                                logger.info("Both app_spec.txt and initializer_prompt.md verified - signaling completion")
+                                self.complete = True
+                                yield {
+                                    "type": "spec_complete",
+                                    "path": str(spec_path)
+                                }
 
     def is_complete(self) -> bool:
         """Check if spec creation is complete."""
