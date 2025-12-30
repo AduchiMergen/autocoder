@@ -203,7 +203,9 @@ export function useSpecChat({
               },
             ])
 
-            onComplete?.(data.path)
+            // NOTE: Do NOT auto-call onComplete here!
+            // User should click "Continue to Project" button to start the agent.
+            // This matches the CLI behavior where user closes the chat manually.
             break
           }
 

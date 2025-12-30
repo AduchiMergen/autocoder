@@ -8,7 +8,8 @@ import { ProgressDashboard } from './components/ProgressDashboard'
 import { SetupWizard } from './components/SetupWizard'
 import { AddFeatureForm } from './components/AddFeatureForm'
 import { FeatureModal } from './components/FeatureModal'
-import { Plus } from 'lucide-react'
+import { DebugLogViewer } from './components/DebugLogViewer'
+import { Plus, Loader2 } from 'lucide-react'
 import type { Feature } from './lib/types'
 
 function App() {
@@ -16,6 +17,7 @@ function App() {
   const [showAddFeature, setShowAddFeature] = useState(false)
   const [selectedFeature, setSelectedFeature] = useState<Feature | null>(null)
   const [setupComplete, setSetupComplete] = useState(true) // Start optimistic
+  const [debugOpen, setDebugOpen] = useState(false)
 
   const { data: projects, isLoading: projectsLoading } = useProjects()
   const { data: features } = useFeatures(selectedProject)
@@ -78,7 +80,7 @@ function App() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className={`max-w-7xl mx-auto px-4 py-8 ${debugOpen ? 'pb-80' : ''}`}>
         {!selectedProject ? (
           <div className="neo-empty-state mt-12">
             <h2 className="font-display text-2xl font-bold mb-2">
@@ -97,6 +99,23 @@ function App() {
               percentage={progress.percentage}
               isConnected={wsState.isConnected}
             />
+
+            {/* Initializing Features State - show when agent is running but no features yet */}
+            {features &&
+             features.pending.length === 0 &&
+             features.in_progress.length === 0 &&
+             features.done.length === 0 &&
+             wsState.agentStatus === 'running' && (
+              <div className="neo-card p-8 text-center">
+                <Loader2 size={32} className="animate-spin mx-auto mb-4 text-[var(--color-neo-progress)]" />
+                <h3 className="font-display font-bold text-xl mb-2">
+                  Initializing Features...
+                </h3>
+                <p className="text-[var(--color-neo-text-secondary)]">
+                  The agent is reading your spec and creating features. This may take a moment.
+                </p>
+              </div>
+            )}
 
             {/* Kanban Board */}
             <KanbanBoard
@@ -121,6 +140,16 @@ function App() {
           feature={selectedFeature}
           projectName={selectedProject}
           onClose={() => setSelectedFeature(null)}
+        />
+      )}
+
+      {/* Debug Log Viewer - fixed to bottom */}
+      {selectedProject && (
+        <DebugLogViewer
+          logs={wsState.logs}
+          isOpen={debugOpen}
+          onToggle={() => setDebugOpen(!debugOpen)}
+          onClear={wsState.clearLogs}
         />
       )}
     </div>

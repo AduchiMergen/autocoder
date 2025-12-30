@@ -49,8 +49,8 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",      # Vite dev server
         "http://127.0.0.1:5173",
-        "http://localhost:8000",      # Production
-        "http://127.0.0.1:8000",
+        "http://localhost:8888",      # Production
+        "http://127.0.0.1:8888",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -167,6 +167,6 @@ if __name__ == "__main__":
     uvicorn.run(
         "server.main:app",
         host="127.0.0.1",  # Localhost only for security
-        port=8000,
+        port=8888,
         reload=True,
     )

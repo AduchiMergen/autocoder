@@ -12,6 +12,9 @@ import { useState } from 'react'
 import { X, Bot, FileEdit, ArrowRight, ArrowLeft, Loader2, CheckCircle2 } from 'lucide-react'
 import { useCreateProject } from '../hooks/useProjects'
 import { SpecCreationChat } from './SpecCreationChat'
+import { startAgent } from '../lib/api'
+
+type InitializerStatus = 'idle' | 'starting' | 'error'
 
 type Step = 'name' | 'method' | 'chat' | 'complete'
 type SpecMethod = 'claude' | 'manual'
@@ -31,6 +34,8 @@ export function NewProjectModal({
   const [projectName, setProjectName] = useState('')
   const [_specMethod, setSpecMethod] = useState<SpecMethod | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [initializerStatus, setInitializerStatus] = useState<InitializerStatus>('idle')
+  const [initializerError, setInitializerError] = useState<string | null>(null)
 
   // Suppress unused variable warning - specMethod may be used in future
   void _specMethod
@@ -89,12 +94,27 @@ export function NewProjectModal({
     }
   }
 
-  const handleSpecComplete = () => {
-    setStep('complete')
-    setTimeout(() => {
-      onProjectCreated(projectName.trim())
-      handleClose()
-    }, 1500)
+  const handleSpecComplete = async () => {
+    // Auto-start the initializer agent
+    setInitializerStatus('starting')
+    try {
+      await startAgent(projectName.trim())
+      // Success - navigate to project
+      setStep('complete')
+      setTimeout(() => {
+        onProjectCreated(projectName.trim())
+        handleClose()
+      }, 1500)
+    } catch (err) {
+      setInitializerStatus('error')
+      setInitializerError(err instanceof Error ? err.message : 'Failed to start agent')
+    }
+  }
+
+  const handleRetryInitializer = () => {
+    setInitializerError(null)
+    setInitializerStatus('idle')
+    handleSpecComplete()
   }
 
   const handleChatCancel = () => {
@@ -108,6 +128,8 @@ export function NewProjectModal({
     setProjectName('')
     setSpecMethod(null)
     setError(null)
+    setInitializerStatus('idle')
+    setInitializerError(null)
     onClose()
   }
 
@@ -126,6 +148,9 @@ export function NewProjectModal({
           projectName={projectName.trim()}
           onComplete={handleSpecComplete}
           onCancel={handleChatCancel}
+          initializerStatus={initializerStatus}
+          initializerError={initializerError}
+          onRetryInitializer={handleRetryInitializer}
         />
       </div>
     )

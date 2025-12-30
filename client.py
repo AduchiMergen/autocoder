@@ -7,6 +7,7 @@ Functions for creating and configuring the Claude Agent SDK client.
 
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
@@ -131,9 +132,17 @@ def create_client(project_dir: Path, model: str):
     print("   - Project settings enabled (skills, commands, CLAUDE.md)")
     print()
 
+    # Use system Claude CLI instead of bundled one (avoids Bun runtime crash on Windows)
+    system_cli = shutil.which("claude")
+    if system_cli:
+        print(f"   - Using system CLI: {system_cli}")
+    else:
+        print("   - Warning: System Claude CLI not found, using bundled CLI")
+
     return ClaudeSDKClient(
         options=ClaudeAgentOptions(
             model=model,
+            cli_path=system_cli,  # Use system CLI to avoid bundled Bun crash (exit code 3)
             system_prompt="You are an expert full-stack developer building a production-quality web application.",
             setting_sources=["project"],  # Enable skills, commands, and CLAUDE.md from project dir
             max_buffer_size=10 * 1024 * 1024,  # 10MB for large Playwright screenshots

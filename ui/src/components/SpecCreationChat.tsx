@@ -6,22 +6,30 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
-import { Send, X, CheckCircle2, AlertCircle, Wifi, WifiOff, RotateCcw } from 'lucide-react'
+import { Send, X, CheckCircle2, AlertCircle, Wifi, WifiOff, RotateCcw, Loader2, ArrowRight } from 'lucide-react'
 import { useSpecChat } from '../hooks/useSpecChat'
 import { ChatMessage } from './ChatMessage'
 import { QuestionOptions } from './QuestionOptions'
 import { TypingIndicator } from './TypingIndicator'
 
+type InitializerStatus = 'idle' | 'starting' | 'error'
+
 interface SpecCreationChatProps {
   projectName: string
   onComplete: (specPath: string) => void
   onCancel: () => void
+  initializerStatus?: InitializerStatus
+  initializerError?: string | null
+  onRetryInitializer?: () => void
 }
 
 export function SpecCreationChat({
   projectName,
   onComplete,
   onCancel,
+  initializerStatus = 'idle',
+  initializerError = null,
+  onRetryInitializer,
 }: SpecCreationChatProps) {
   const [input, setInput] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -241,18 +249,50 @@ export function SpecCreationChat({
 
       {/* Completion footer */}
       {isComplete && (
-        <div className="p-4 border-t-3 border-[var(--color-neo-border)] bg-[var(--color-neo-done)]">
+        <div className={`p-4 border-t-3 border-[var(--color-neo-border)] ${
+          initializerStatus === 'error' ? 'bg-[var(--color-neo-danger)]' : 'bg-[var(--color-neo-done)]'
+        }`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <CheckCircle2 size={20} />
-              <span className="font-bold">Specification created successfully!</span>
+              {initializerStatus === 'starting' ? (
+                <>
+                  <Loader2 size={20} className="animate-spin" />
+                  <span className="font-bold">Starting agent...</span>
+                </>
+              ) : initializerStatus === 'error' ? (
+                <>
+                  <AlertCircle size={20} className="text-white" />
+                  <span className="font-bold text-white">
+                    {initializerError || 'Failed to start agent'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 size={20} />
+                  <span className="font-bold">Specification created successfully!</span>
+                </>
+              )}
             </div>
-            <button
-              onClick={() => onComplete('')}
-              className="neo-btn bg-white"
-            >
-              Continue to Project
-            </button>
+            <div className="flex items-center gap-2">
+              {initializerStatus === 'error' && onRetryInitializer && (
+                <button
+                  onClick={onRetryInitializer}
+                  className="neo-btn bg-white"
+                >
+                  <RotateCcw size={14} />
+                  Retry
+                </button>
+              )}
+              {initializerStatus === 'idle' && (
+                <button
+                  onClick={() => onComplete('')}
+                  className="neo-btn neo-btn-primary"
+                >
+                  Continue to Project
+                  <ArrowRight size={16} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

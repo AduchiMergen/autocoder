@@ -136,13 +136,27 @@ async def spec_chat_websocket(websocket: WebSocket, project_name: str):
                     # Create and start a new session
                     session = await create_session(project_name)
 
+                    # Track spec completion state
+                    spec_complete_received = False
+                    spec_path = None
+
                     # Stream the initial greeting
                     async for chunk in session.start():
-                        await websocket.send_json(chunk)
-
-                        # Check for completion
+                        # Track spec_complete but don't send complete yet
                         if chunk.get("type") == "spec_complete":
-                            await websocket.send_json({"type": "complete"})
+                            spec_complete_received = True
+                            spec_path = chunk.get("path")
+                            await websocket.send_json(chunk)
+                            continue
+
+                        # When response_done arrives, send complete if spec was done
+                        if chunk.get("type") == "response_done":
+                            await websocket.send_json(chunk)
+                            if spec_complete_received:
+                                await websocket.send_json({"type": "complete", "path": spec_path})
+                            continue
+
+                        await websocket.send_json(chunk)
 
                 elif msg_type == "message":
                     # User sent a message
@@ -163,13 +177,27 @@ async def spec_chat_websocket(websocket: WebSocket, project_name: str):
                         })
                         continue
 
+                    # Track spec completion state
+                    spec_complete_received = False
+                    spec_path = None
+
                     # Stream Claude's response
                     async for chunk in session.send_message(user_content):
-                        await websocket.send_json(chunk)
-
-                        # Check for completion
+                        # Track spec_complete but don't send complete yet
                         if chunk.get("type") == "spec_complete":
-                            await websocket.send_json({"type": "complete"})
+                            spec_complete_received = True
+                            spec_path = chunk.get("path")
+                            await websocket.send_json(chunk)
+                            continue
+
+                        # When response_done arrives, send complete if spec was done
+                        if chunk.get("type") == "response_done":
+                            await websocket.send_json(chunk)
+                            if spec_complete_received:
+                                await websocket.send_json({"type": "complete", "path": spec_path})
+                            continue
+
+                        await websocket.send_json(chunk)
 
                 elif msg_type == "answer":
                     # User answered a structured question
@@ -196,12 +224,27 @@ async def spec_chat_websocket(websocket: WebSocket, project_name: str):
                     else:
                         user_response = str(answers)
 
+                    # Track spec completion state
+                    spec_complete_received = False
+                    spec_path = None
+
                     # Stream Claude's response
                     async for chunk in session.send_message(user_response):
-                        await websocket.send_json(chunk)
-
+                        # Track spec_complete but don't send complete yet
                         if chunk.get("type") == "spec_complete":
-                            await websocket.send_json({"type": "complete"})
+                            spec_complete_received = True
+                            spec_path = chunk.get("path")
+                            await websocket.send_json(chunk)
+                            continue
+
+                        # When response_done arrives, send complete if spec was done
+                        if chunk.get("type") == "response_done":
+                            await websocket.send_json(chunk)
+                            if spec_complete_received:
+                                await websocket.send_json({"type": "complete", "path": spec_path})
+                            continue
+
+                        await websocket.send_json(chunk)
 
                 else:
                     await websocket.send_json({

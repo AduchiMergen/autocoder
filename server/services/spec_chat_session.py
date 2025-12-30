@@ -8,6 +8,7 @@ Uses the create-spec.md skill to guide users through app spec creation.
 
 import asyncio
 import logging
+import shutil
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -87,15 +88,19 @@ class SpecChatSession:
         system_prompt = skill_content.replace("$ARGUMENTS", project_path)
 
         # Create Claude SDK client with limited tools for spec creation
+        # Use Opus for best quality spec generation
+        # Use system CLI to avoid bundled Bun runtime crash (exit code 3) on Windows
+        system_cli = shutil.which("claude")
         try:
             self.client = ClaudeSDKClient(
                 options=ClaudeAgentOptions(
-                    model="claude-sonnet-4-20250514",
+                    model="claude-opus-4-5-20251101",
+                    cli_path=system_cli,
                     system_prompt=system_prompt,
                     allowed_tools=[
                         "Read",
                         "Write",
-                        "AskUserQuestion",
+                        "Glob",
                     ],
                     max_turns=100,
                     cwd=str(ROOT_DIR.resolve()),
@@ -169,7 +174,7 @@ class SpecChatSession:
         """
         Internal method to query Claude and stream responses.
 
-        Handles tool calls (AskUserQuestion, Write) and text responses.
+        Handles tool calls (Write) and text responses.
         """
         if not self.client:
             return
@@ -178,6 +183,7 @@ class SpecChatSession:
         await self.client.query(message)
 
         current_text = ""
+        pending_spec_write = None  # Track if we're waiting for app_spec.txt write result
 
         # Stream the response using receive_response
         async for msg in self.client.receive_response():
@@ -207,27 +213,17 @@ class SpecChatSession:
                         tool_input = getattr(block, "input", {})
                         tool_id = getattr(block, "id", "")
 
-                        if tool_name == "AskUserQuestion":
-                            # Convert AskUserQuestion to structured UI
-                            questions = tool_input.get("questions", [])
-                            yield {
-                                "type": "question",
-                                "questions": questions,
-                                "tool_id": tool_id
-                            }
-                            # The SDK handles tool results internally
-
-                        elif tool_name == "Write":
-                            # File being written - the SDK handles this
+                        if tool_name == "Write":
+                            # File being written - track for verification
                             file_path = tool_input.get("file_path", "")
 
-                            # Check if this is the app_spec.txt file
+                            # Track if this is the app_spec.txt file
                             if "app_spec.txt" in str(file_path):
-                                self.complete = True
-                                yield {
-                                    "type": "spec_complete",
-                                    "path": str(file_path)
+                                pending_spec_write = {
+                                    "tool_id": tool_id,
+                                    "path": file_path
                                 }
+                                logger.info(f"Write tool called for app_spec.txt: {file_path}")
 
                             elif "initializer_prompt.md" in str(file_path):
                                 yield {
@@ -236,15 +232,36 @@ class SpecChatSession:
                                 }
 
             elif msg_type == "UserMessage" and hasattr(msg, "content"):
-                # Tool results - the SDK handles these automatically
-                # We just watch for any errors
+                # Tool results - check for write confirmations and errors
                 for block in msg.content:
                     block_type = type(block).__name__
                     if block_type == "ToolResultBlock":
                         is_error = getattr(block, "is_error", False)
+                        tool_use_id = getattr(block, "tool_use_id", "")
+
                         if is_error:
                             content = getattr(block, "content", "Unknown error")
                             logger.warning(f"Tool error: {content}")
+                            # If the spec write failed, clear the pending write
+                            if pending_spec_write and tool_use_id == pending_spec_write.get("tool_id"):
+                                logger.error(f"app_spec.txt write failed: {content}")
+                                pending_spec_write = None
+                        else:
+                            # Tool succeeded - check if it was the spec write
+                            if pending_spec_write and tool_use_id == pending_spec_write.get("tool_id"):
+                                spec_path = pending_spec_write["path"]
+                                # Verify the file actually exists
+                                full_path = ROOT_DIR / spec_path
+                                if full_path.exists():
+                                    logger.info(f"app_spec.txt verified at: {full_path}")
+                                    self.complete = True
+                                    yield {
+                                        "type": "spec_complete",
+                                        "path": str(spec_path)
+                                    }
+                                else:
+                                    logger.error(f"app_spec.txt not found after write: {full_path}")
+                                pending_spec_write = None
 
     def is_complete(self) -> bool:
         """Check if spec creation is complete."""
