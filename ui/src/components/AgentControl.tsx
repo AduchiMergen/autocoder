@@ -1,4 +1,4 @@
-import { Play, Square, Loader2, Flame } from 'lucide-react'
+import { Play, Square, Loader2 } from 'lucide-react'
 import {
   useStartAgent,
   useStopAgent,
@@ -40,8 +40,6 @@ export function AgentControl({ projectName, status }: AgentControlProps) {
         >
           {isLoading ? (
             <Loader2 size={18} className="animate-spin" />
-          ) : yoloMode ? (
-            <Flame size={18} />
           ) : (
             <Play size={18} />
           )}
@@ -50,9 +48,11 @@ export function AgentControl({ projectName, status }: AgentControlProps) {
         <button
           onClick={handleStop}
           disabled={isLoading}
-          className="neo-btn neo-btn-danger text-sm py-2 px-3"
-          title="Stop Agent"
-          aria-label="Stop Agent"
+          className={`neo-btn text-sm py-2 px-3 ${
+            yoloMode ? 'neo-btn-yolo' : 'neo-btn-danger'
+          }`}
+          title={yoloMode ? 'Stop Agent (YOLO Mode)' : 'Stop Agent'}
+          aria-label={yoloMode ? 'Stop Agent in YOLO Mode' : 'Stop Agent'}
         >
           {isLoading ? (
             <Loader2 size={18} className="animate-spin" />
